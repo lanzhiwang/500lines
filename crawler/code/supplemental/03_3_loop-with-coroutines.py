@@ -12,60 +12,70 @@ import re
 import urllib.parse
 import time
 
+urls_todo = set(['/'])
+urls_seen = set(['/'])
+selector = DefaultSelector()
+stopped = False
+concurrency_achieved = 0
 
 class Future:
-    def __init__(self):
+    def __init__(self, name):
+        self.name = name
         self.result = None
         self._callbacks = []
-
-    def result(self):
-        return self.result
 
     def add_done_callback(self, fn):
         self._callbacks.append(fn)
 
     def set_result(self, result):
+        print('set future result: %s' % result)
         self.result = result
         for fn in self._callbacks:
             fn(self)
 
     def __iter__(self):
+        print('__iter__')
         yield self  # This tells Task to wait for completion.
         return self.result
+
+    def __str__(self):
+        return 'future name: %s, result: %s, id: %s' % (self.name, self.result, id(self))
+
+
 
 
 class Task:
     def __init__(self, coro):
+        print('init task')
         self.coro = coro
-        f = Future()
+        print('****** init future ******')
+        f = Future('init')
         f.set_result(None)
+        print(f)
         self.step(f)
 
     def step(self, future):
+        print('step start')
+        print('old future: %s' % future)
         try:
             next_future = self.coro.send(future.result)
         except StopIteration:
             return
 
+        print('new future: %s' % next_future)
         next_future.add_done_callback(self.step)
-
-
-urls_seen = set(['/'])
-urls_todo = set(['/'])
-concurrency_achieved = 0
-selector = DefaultSelector()
-stopped = False
+        print('step end')
 
 
 def connect(sock, address):
-    f = Future()
     sock.setblocking(False)
     try:
         sock.connect(address)
     except BlockingIOError:
         pass
-
+    f = Future('connect')
     def on_connected():
+        print('on connected callback')
         f.set_result(None)
 
     selector.register(sock.fileno(), EVENT_WRITE, on_connected)
@@ -74,10 +84,10 @@ def connect(sock, address):
 
 
 def read(sock):
-    f = Future()
-
+    f = Future('read')
     def on_readable():
-        f.set_result(sock.recv(4096))  # Read 4k at a time.
+        print('on read callback')
+        f.set_result(sock.recv(1024))  # Read 4k at a time.
 
     selector.register(sock.fileno(), EVENT_READ, on_readable)
     chunk = yield from f
@@ -106,19 +116,16 @@ class Fetcher:
 
         sock = socket.socket()
         yield from connect(sock, ('xkcd.com', 80))
+
         get = 'GET {} HTTP/1.0\r\nHost: xkcd.com\r\n\r\n'.format(self.url)
+        print(get)
         sock.send(get.encode('ascii'))
         self.response = yield from read_all(sock)
-
         self._process_response()
         urls_todo.remove(self.url)
         if not urls_todo:
             stopped = True
         print(self.url)
-
-    def body(self):
-        body = self.response.split(b'\r\n\r\n', 1)[1]
-        return body.decode('utf-8')
 
     def _process_response(self):
         if not self.response:
@@ -126,9 +133,7 @@ class Fetcher:
             return
         if not self._is_html():
             return
-        urls = set(re.findall(r'''(?i)href=["']?([^\s"'<>]+)''',
-                              self.body()))
-
+        urls = set(re.findall(r'''(?i)href=["']?([^\s"'<>]+)''', self.body()))
         for url in urls:
             normalized = urllib.parse.urljoin(self.url, url)
             parts = urllib.parse.urlparse(normalized)
@@ -143,6 +148,10 @@ class Fetcher:
                 urls_seen.add(defragmented)
                 Task(Fetcher(defragmented).fetch())
 
+    def body(self):
+        body = self.response.split(b'\r\n\r\n', 1)[1]
+        return body.decode('utf-8')
+
     def _is_html(self):
         head, body = self.response.split(b'\r\n\r\n', 1)
         headers = dict(h.split(': ') for h in head.decode().split('\r\n')[1:])
@@ -154,6 +163,7 @@ fetcher = Fetcher('/')
 Task(fetcher.fetch())
 
 while not stopped:
+    print('********* start select *********')
     events = selector.select()
     for event_key, event_mask in events:
         callback = event_key.data
@@ -161,3 +171,4 @@ while not stopped:
 
 print('{} URLs fetched in {:.1f} seconds, achieved concurrency = {}'.format(
     len(urls_seen), time.time() - start, concurrency_achieved))
+
