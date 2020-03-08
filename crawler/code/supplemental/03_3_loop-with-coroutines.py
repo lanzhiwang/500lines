@@ -131,9 +131,11 @@ class Fetcher:
         if not self.response:
             print('error: {}'.format(self.url))
             return
-        if not self._is_html():
-            return
+        # if not self._is_html():
+        #     return
         urls = set(re.findall(r'''(?i)href=["']?([^\s"'<>]+)''', self.body()))
+        urls = ['/353/']
+        print(urls)
         for url in urls:
             normalized = urllib.parse.urljoin(self.url, url)
             parts = urllib.parse.urlparse(normalized)
@@ -172,3 +174,80 @@ while not stopped:
 print('{} URLs fetched in {:.1f} seconds, achieved concurrency = {}'.format(
     len(urls_seen), time.time() - start, concurrency_achieved))
 
+
+"""
+init task
+****** init future ******
+set future result: None
+future name: init, result: None, id: 4349341936
+step start
+old future: future name: init, result: None, id: 4349341936
+__iter__
+new future: future name: connect, result: None, id: 4349341992
+step end
+********* start select *********
+on connected callback
+set future result: None
+step start
+old future: future name: connect, result: None, id: 4349341992
+GET / HTTP/1.0
+Host: xkcd.com
+
+
+__iter__
+new future: future name: read, result: None, id: 4349342888
+step end
+********* start select *********
+on read callback
+set future result: b'HTTP/1.1 301 Moved Permanently\r\nServer: Varnish\r\nRetry-After: 0\r\nLocation: https://xkcd.com/\r\nContent-Length: 0\r\nAccept-Ranges: bytes\r\nDate: Sun, 08 Mar 2020 09:05:21 GMT\r\nVia: 1.1 varnish\r\nConnection: close\r\nX-Served-By: cache-tyo19929-TYO\r\nX-Cache: HIT\r\nX-Cache-Hits: 0\r\nX-Timer: S1583658322.759161,VS0,VE0\r\n\r\n'
+step start
+old future: future name: read, result: b'HTTP/1.1 301 Moved Permanently\r\nServer: Varnish\r\nRetry-After: 0\r\nLocation: https://xkcd.com/\r\nContent-Length: 0\r\nAccept-Ranges: bytes\r\nDate: Sun, 08 Mar 2020 09:05:21 GMT\r\nVia: 1.1 varnish\r\nConnection: close\r\nX-Served-By: cache-tyo19929-TYO\r\nX-Cache: HIT\r\nX-Cache-Hits: 0\r\nX-Timer: S1583658322.759161,VS0,VE0\r\n\r\n', id: 4349342888
+__iter__
+new future: future name: read, result: None, id: 4349341992
+step end
+********* start select *********
+on read callback
+set future result: b''
+step start
+old future: future name: read, result: b'', id: 4349341992
+['/353/']
+init task
+****** init future ******
+set future result: None
+future name: init, result: None, id: 4349344400
+step start
+old future: future name: init, result: None, id: 4349344400
+__iter__
+new future: future name: connect, result: None, id: 4349344232
+step end
+/
+********* start select *********
+on connected callback
+set future result: None
+step start
+old future: future name: connect, result: None, id: 4349344232
+GET /353/ HTTP/1.0
+Host: xkcd.com
+
+
+__iter__
+new future: future name: read, result: None, id: 4349341992
+step end
+********* start select *********
+on read callback
+set future result: b'HTTP/1.1 301 Moved Permanently\r\nServer: Varnish\r\nRetry-After: 0\r\nLocation: https://xkcd.com/353/\r\nContent-Length: 0\r\nAccept-Ranges: bytes\r\nDate: Sun, 08 Mar 2020 09:05:21 GMT\r\nVia: 1.1 varnish\r\nConnection: close\r\nX-Served-By: cache-tyo19945-TYO\r\nX-Cache: HIT\r\nX-Cache-Hits: 0\r\nX-Timer: S1583658322.885927,VS0,VE0\r\n\r\n'
+step start
+old future: future name: read, result: b'HTTP/1.1 301 Moved Permanently\r\nServer: Varnish\r\nRetry-After: 0\r\nLocation: https://xkcd.com/353/\r\nContent-Length: 0\r\nAccept-Ranges: bytes\r\nDate: Sun, 08 Mar 2020 09:05:21 GMT\r\nVia: 1.1 varnish\r\nConnection: close\r\nX-Served-By: cache-tyo19945-TYO\r\nX-Cache: HIT\r\nX-Cache-Hits: 0\r\nX-Timer: S1583658322.885927,VS0,VE0\r\n\r\n', id: 4349341992
+__iter__
+new future: future name: read, result: None, id: 4349344232
+step end
+********* start select *********
+on read callback
+set future result: b''
+step start
+old future: future name: read, result: b'', id: 4349344232
+['/353/']
+/353/
+2 URLs fetched in 0.3 seconds, achieved concurrency = 2
+
+"""
