@@ -82,6 +82,9 @@ IndexError: index out of range
 """
 
 # data types
+"""
+Proposal(caller='N2', client_id=100000, input=('get', 'b'))
+"""
 Proposal = namedtuple('Proposal', ['caller', 'client_id', 'input'])  # 提案
 Ballot = namedtuple('Ballot', ['n', 'leader'])  # 选票
 
@@ -90,13 +93,35 @@ Accepted = namedtuple('Accepted', ['slot', 'ballot_num'])
 Accept = namedtuple('Accept', ['slot', 'ballot_num', 'proposal'])
 Decision = namedtuple('Decision', ['slot', 'proposal'])  # 决断
 Invoked = namedtuple('Invoked', ['client_id', 'output'])  # 调用
+
+"""
+Invoke(caller=self.node.address, client_id=self.client_id, input_value=self.n)
+Invoke(caller='N2', client_id=100000, input_value=('get', 'b'))
+"""
 Invoke = namedtuple('Invoke', ['caller', 'client_id', 'input_value'])
+
+"""
+Join()
+"""
 Join = namedtuple('Join', [])
-Active = namedtuple('Active', [])  # 活性
+Active = namedtuple('Active', [])  # 存活
+
+"""
+Prepare(ballot_num=Ballot(n=0, leader='N2')) to ['N0', 'N1', 'N2']
+"""
 Prepare = namedtuple('Prepare', ['ballot_num'])  # 准备
 Promise = namedtuple('Promise', ['ballot_num', 'accepted_proposals'])  # 诺言
-Propose = namedtuple('Propose', ['slot', 'proposal'])  # 优惠
+
+"""
+Propose(slot=1, proposal=Proposal(caller='N2', client_id=100000, input=('get', 'b')))
+"""
+Propose = namedtuple('Propose', ['slot', 'proposal'])  # 提出提案
+
+"""
+Welcome(state=self.initial_state, slot=1, decisions={})
+"""
 Welcome = namedtuple('Welcome', ['state', 'slot', 'decisions'])
+
 Decided = namedtuple('Decided', ['slot'])  # 决定
 Preempted = namedtuple('Preempted', ['slot', 'preempted_by'])  # 抢占
 Adopted = namedtuple('Adopted', ['ballot_num', 'accepted_proposals'])  # 通过
@@ -124,6 +149,9 @@ class Node(object):
         self.roles = []
         self.send = functools.partial(self.network.send, self)
 
+    def __repr__(self):
+        return 'node address: %s, roles: %s' % (self.address, self.roles)
+
     def register(self, roles):
         self.roles.append(roles)
 
@@ -131,7 +159,10 @@ class Node(object):
         self.roles.remove(roles)
 
     def receive(self, sender, message):
+        # print(self)  # node address: N0, roles: [<cluster.Seed object at 0x100f3bb90>]
+        # print(sender)  # N4
         handler_name = 'do_%s' % type(message).__name__
+        # print(handler_name)  # do_Join
 
         for comp in self.roles[:]:
             if not hasattr(comp, handler_name):
@@ -323,7 +354,8 @@ class Replica(Role):
 
     def do_Invoke(self, sender, caller, client_id, input_value):
         proposal = Proposal(caller, client_id, input_value)
-        slot = next((s for s, p in self.proposals.iteritems() if p == proposal), None)
+        slot = next((s for s, p in self.proposals.items() if p == proposal), None)
+        print(slot)
         # propose, or re-propose if this proposal already has a slot
         self.propose(proposal, slot)
 
@@ -332,6 +364,14 @@ class Replica(Role):
         if not slot:
             slot, self.next_slot = self.next_slot, self.next_slot + 1
         self.proposals[slot] = proposal
+        # print(self.proposals)
+        """
+        {
+            1: Proposal(caller='N2', client_id=100000, input=('get', 'b')),
+            2: Proposal(caller='N2', client_id=100001, input=('get', 'a'))
+        }
+        """
+
         # find a leader we think is working - either the latest we know of, or
         # ourselves (which may trigger a scout to make us the leader)
         leader = self.latest_leader or self.node.address
@@ -479,7 +519,7 @@ class Scout(Role):
             if len(self.acceptors) >= self.quorum:
                 # strip the ballot numbers from self.accepted_proposals, now that it
                 # represents a majority
-                accepted_proposals = dict((s, p) for s, (b, p) in self.accepted_proposals.iteritems())
+                accepted_proposals = dict((s, p) for s, (b, p) in self.accepted_proposals.items())
                 # We're adopted; note that this does *not* mean that no other leader is active.
                 # Any such conflicts will be handled by the commanders.
                 self.node.send([self.node.address],
@@ -515,6 +555,7 @@ class Leader(Role):
         assert not self.scouting
         self.scouting = True
         self.scout_cls(self.node, self.ballot_num, self.peers).start()
+        print(self.node.roles)
 
     def do_Adopted(self, sender, ballot_num, accepted_proposals):
         self.scouting = False
@@ -581,6 +622,7 @@ class Bootstrap(Role):
                          state=state, slot=slot, decisions=decisions)
         self.leader_cls(self.node, peers=self.peers, commander_cls=self.commander_cls,
                         scout_cls=self.scout_cls).start()
+        # print(self.node.roles)
         self.stop()
 
 
@@ -599,7 +641,7 @@ class Seed(Role):
         self.exit_timer = None  # None
 
     def do_Join(self, sender):
-        self.seen_peers.add(sender)
+        self.seen_peers.add(sender)  # N4
         if len(self.seen_peers) <= len(self.peers) / 2:
             return
 

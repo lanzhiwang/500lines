@@ -47,7 +47,7 @@ def main():
 
     network = Network(int(sys.argv[1]))  # int(sys.argv[1]) = 10
 
-    peers = ['N%d' % i for i in range(7)]  # ['N0', 'N1', 'N2', 'N3', 'N4', 'N5', 'N6']
+    peers = ['N%d' % i for i in range(3)]  # ['N0', 'N1', 'N2', 'N3', 'N4', 'N5', 'N6']
     for p in peers:
         node = network.new_node(address=p)
         if p == 'N0':
