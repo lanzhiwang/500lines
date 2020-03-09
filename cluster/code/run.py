@@ -10,6 +10,7 @@ def key_value_state_machine(state, input_value):
 
 sequences_running = 0
 def do_sequence(network, node, key):
+    # print(node)  # address: N6, roles: [<cluster.Bootstrap object at 0x10c08acd0>]
     global sequences_running
     sequences_running += 1
     reqs = [
@@ -29,6 +30,9 @@ def do_sequence(network, node, key):
             return
         input, exp_output = reqs.pop(0)
         def req_done(output):
+            print('qwe')
+            if output == exp_output:
+                sys.exit()
             assert output == exp_output, "%r != %r" % (output, exp_output)
             request()
         Requester(node, input, req_done).start()
@@ -50,10 +54,18 @@ def main():
             Seed(node, initial_state={}, peers=peers, execute_fn=key_value_state_machine)
         else:
             Bootstrap(node, execute_fn=key_value_state_machine, peers=peers).start()
-            sys.exit()
 
-    for key in 'abcdefg':
+    for key in 'ab':
         do_sequence(network, node, key)
+
+    # def req_done(output):
+    #     return output
+
+    # input = ('set', 'a', 10)
+    # Requester(node, input, req_done).start()
+
+
+    # print(network.timers)
     network.run()
 
 if __name__ == "__main__":

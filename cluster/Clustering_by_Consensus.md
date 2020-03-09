@@ -208,7 +208,7 @@ class Role(object):
         self.node.unregister(self)
 ```
 
-The roles that a cluster node has are glued together by the `Node` class, which represents a single node on the network. Roles are added to and removed from the node as execution proceeds. Messages that arrive on the node are relayed to all active roles, calling a method named after the message type with a `do_` prefix. These `do_` methods receive the message's attributes as keyword arguments for easy access. The `Node` class also provides a `send` method as a convenience, using `functools.partial` to supply some arguments to the same methods of the `Network` class.
+The roles that a cluster node has are glued together by the `Node` class, which represents a single node on the network. Roles are added to and removed from the node as execution proceeds. Messages that arrive on the node are relayed to all active roles, calling a method named after the message type with a `do_` prefix. These `do_` methods receive the message's attributes as keyword arguments for easy access. The `Node` class also provides a `send` method as a convenience, using `functools.partial` to supply some arguments to the same methods of the `Network` class.  群集节点具有的角色由Node类粘合在一起，Node类代表网络上的单个节点。 随着执行的进行，角色将添加到节点或从节点删除。 到达节点的消息将中继到所有活动角色，并调用以do_前缀的消息类型命名的方法。 这些do_方法将消息的属性作为关键字参数接收，以便于访问。 为了方便起见，Node类还提供了send方法，使用functools.partial为Network类的相同方法提供一些参数。
 
 ```
 class Node(object):
@@ -243,9 +243,9 @@ class Node(object):
 
 ### Application Interface
 
-The application creates and starts a `Member` object on each cluster member, providing an application-specific state machine and a list of peers. The member object adds a bootstrap role to the node if it is joining an existing cluster, or seed if it is creating a new cluster. It then runs the protocol (via `Network.run`) in a separate thread.
+The application creates and starts a `Member` object on each cluster member, providing an application-specific state machine and a list of peers. The member object adds a bootstrap role to the node if it is joining an existing cluster, or seed if it is creating a new cluster. It then runs the protocol (via `Network.run`) in a separate thread.  该应用程序在每个集群成员上创建并启动Member对象，从而提供特定于应用程序的状态机和对等项列表。 如果成员对象加入现有集群，则该成员对象向该节点添加引导角色，如果正在创建新集群，则该成员对象添加种子。 然后，它在单独的线程中运行协议（通过Network.run）。
 
-The application interacts with the cluster through the `invoke` method, which kicks off a proposal for a state transition. Once that proposal is decided and the state machine runs, `invoke` returns the machine's output. The method uses a simple synchronized `Queue` to wait for the result from the protocol thread.
+The application interacts with the cluster through the `invoke` method, which kicks off a proposal for a state transition. Once that proposal is decided and the state machine runs, `invoke` returns the machine's output. The method uses a simple synchronized `Queue` to wait for the result from the protocol thread.  该应用程序通过invoke方法与集群交互，从而启动状态转换的建议。 确定该提议并运行状态机后，invoke将返回该机的输出。 该方法使用一个简单的同步队列来等待协议线程的结果。
 
 ```
 class Member(object):
@@ -283,7 +283,7 @@ Let's look at each of the role classes in the library one by one.
 
 #### Acceptor
 
-The `Acceptor` implements the acceptor role in the protocol, so it must store the ballot number representing its most recent promise, along with the set of accepted proposals for each slot. It then responds to `Prepare` and `Accept` messages according to the protocol. The result is a short class that is easy to compare to the protocol.
+The `Acceptor` implements the acceptor role in the protocol, so it must store the ballot number representing its most recent promise, along with the set of accepted proposals for each slot. It then responds to `Prepare` and `Accept` messages according to the protocol. The result is a short class that is easy to compare to the protocol.  接受者在协议中实现了接受者角色，因此它必须存储代表其最新承诺的投票号以及每个版位的接受提议集。 然后，它根据协议响应“准备”和“接受”消息。 结果是很短的一类，易于与协议进行比较。
 
 For acceptors, Multi-Paxos looks a lot like Simple Paxos, with the addition of slot numbers to the messages.
 
@@ -319,16 +319,15 @@ class Acceptor(Role):
 
 #### Replica
 
- 
+The `Replica` class is the most complicated role class, as it has a few closely related responsibilities:  副本类是最复杂的角色类，因为它具有一些紧密相关的职责：
 
-The `Replica` class is the most complicated role class, as it has a few closely related responsibilities:
+- Making new proposals;   提出新建议；
 
-- Making new proposals;
-- Invoking the local state machine when proposals are decided;
-- Tracking the current leader; and
-- Adding newly started nodes to the cluster.
+- Invoking the local state machine when proposals are decided;  提案确定后调用本地状态机；
+- Tracking the current leader; and  跟踪当前领导者；
+- Adding newly started nodes to the cluster.  将新启动的节点添加到集群。
 
-The replica creates new proposals in response to `Invoke` messages from clients, selecting what it believes to be an unused slot and sending a `Propose` message to the current leader ([Figure 3.2](http://aosabook.org/en/500L/clustering-by-consensus.html#figure-3.2).) Furthermore, if the consensus for the selected slot is for a different proposal, the replica must re-propose with a new slot.
+The replica creates new proposals in response to `Invoke` messages from clients, selecting what it believes to be an unused slot and sending a `Propose` message to the current leader ([Figure 3.2](http://aosabook.org/en/500L/clustering-by-consensus.html#figure-3.2).) Furthermore, if the consensus for the selected slot is for a different proposal, the replica must re-propose with a new slot.  副本会响应来自客户端的Invoke消息创建新建议，选择它认为是未使用的广告位，然后将Propose消息发送给当前的领导者（图3.2。）。此外，如果所选广告位的共识是针对其他建议 ，则副本必须使用新的插槽重新提议。
 
 ![Figure 3.2 - Replica Role Control Flow](http://aosabook.org/en/500L/cluster-images/replica.png)
 

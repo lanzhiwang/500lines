@@ -1,32 +1,105 @@
+# -*- coding: utf-8 -*-
+
 from collections import namedtuple
 import copy
 import functools
 import heapq
 import itertools
 import logging
-import Queue
+from queue import Queue
 import random
 import threading
+import traceback
+import sys
+
+"""
+基础: python 优先队列的使用方法
+>>> import heapq
+>>> pqueue = []
+>>> heapq.heappush(pqueue, (1, 'A'))
+>>> heapq.heappush(pqueue, (7, 'B'))
+>>> heapq.heappush(pqueue, (3, 'C'))
+>>> heapq.heappush(pqueue, (6, 'D'))
+>>> heapq.heappush(pqueue, (2, 'E'))
+>>> heapq.heappush(pqueue, (3, 'F'))
+>>>
+>>> pqueue[0]
+(1, 'A')
+>>> pqueue[0]
+(1, 'A')
+>>> pqueue[1]
+(2, 'E')
+>>> pqueue[2]
+(3, 'C')
+>>> pqueue[3]
+(7, 'B')
+>>> pqueue[4]
+(6, 'D')
+>>> pqueue[0]
+(1, 'A')
+>>>
+>>> heapq.heappop(pqueue)
+(1, 'A')
+>>> heapq.heappop(pqueue)
+(2, 'E')
+>>> heapq.heappop(pqueue)
+(3, 'C')
+>>> heapq.heappop(pqueue)
+(3, 'F')
+>>> heapq.heappop(pqueue)
+(6, 'D')
+>>> heapq.heappop(pqueue)
+(7, 'B')
+>>> heapq.heappop(pqueue)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+IndexError: index out of range
+
+>>> import random
+>>> rnd = random.Random(10)
+>>> rnd.uniform(0, 1.0)
+0.5714025946899135
+>>> rnd.uniform(0, 1.0)
+0.4288890546751146
+>>> rnd.uniform(0, 1.0)
+0.5780913011344704
+>>> rnd.uniform(0, 1.0)
+0.20609823213950174
+>>> rnd.uniform(0, 1.0)
+0.81332125135732
+>>>
+>>> rnd.uniform(-0.02, 0.02)
+0.012943554901337816
+>>> rnd.uniform(-0.02, 0.02)
+0.006138901356047031
+>>> rnd.uniform(-0.02, 0.02)
+-0.013590817739247214
+>>> rnd.uniform(-0.02, 0.02)
+0.0008267743855969838
+>>> rnd.uniform(-0.02, 0.02)
+-0.0068890875351162745
+>>>
+"""
 
 # data types
-Proposal = namedtuple('Proposal', ['caller', 'client_id', 'input'])
-Ballot = namedtuple('Ballot', ['n', 'leader'])
+Proposal = namedtuple('Proposal', ['caller', 'client_id', 'input'])  # 提案
+Ballot = namedtuple('Ballot', ['n', 'leader'])  # 选票
 
 # message types
 Accepted = namedtuple('Accepted', ['slot', 'ballot_num'])
 Accept = namedtuple('Accept', ['slot', 'ballot_num', 'proposal'])
-Decision = namedtuple('Decision', ['slot', 'proposal'])
-Invoked = namedtuple('Invoked', ['client_id', 'output'])
+Decision = namedtuple('Decision', ['slot', 'proposal'])  # 决断
+Invoked = namedtuple('Invoked', ['client_id', 'output'])  # 调用
 Invoke = namedtuple('Invoke', ['caller', 'client_id', 'input_value'])
 Join = namedtuple('Join', [])
-Active = namedtuple('Active', [])
-Prepare = namedtuple('Prepare', ['ballot_num'])
-Promise = namedtuple('Promise', ['ballot_num', 'accepted_proposals'])
-Propose = namedtuple('Propose', ['slot', 'proposal'])
+Active = namedtuple('Active', [])  # 活性
+Prepare = namedtuple('Prepare', ['ballot_num'])  # 准备
+Promise = namedtuple('Promise', ['ballot_num', 'accepted_proposals'])  # 诺言
+Propose = namedtuple('Propose', ['slot', 'proposal'])  # 优惠
 Welcome = namedtuple('Welcome', ['state', 'slot', 'decisions'])
-Decided = namedtuple('Decided', ['slot'])
-Preempted = namedtuple('Preempted', ['slot', 'preempted_by'])
-Adopted = namedtuple('Adopted', ['ballot_num', 'accepted_proposals'])
+Decided = namedtuple('Decided', ['slot'])  # 决定
+Preempted = namedtuple('Preempted', ['slot', 'preempted_by'])  # 抢占
+Adopted = namedtuple('Adopted', ['ballot_num', 'accepted_proposals'])  # 通过
 Accepting = namedtuple('Accepting', ['leader'])
 
 # constants - these times should really be in terms of average round-trip time
@@ -39,12 +112,13 @@ LEADER_TIMEOUT = 1.0
 NULL_BALLOT = Ballot(-1, -1)  # sorts before all real ballots
 NOOP_PROPOSAL = Proposal(None, None, None)  # no-op to fill otherwise empty slots
 
+
 class Node(object):
     unique_ids = itertools.count()
 
     def __init__(self, network, address):
         self.network = network
-        self.address = address or 'N%d' % self.unique_ids.next()
+        self.address = address or next(self.__class__.unique_ids)
         self.logger = SimTimeLogger(logging.getLogger(self.address), {'network': self.network})
         self.logger.info('starting')
         self.roles = []
@@ -66,13 +140,17 @@ class Node(object):
             fn = getattr(comp, handler_name)
             fn(sender=sender, **message._asdict())
 
+
 class Timer(object):
 
     def __init__(self, expires, address, callback):
         self.expires = expires
-        self.address = address
-        self.callback = callback
+        self.address = address  # address 消息接收者 N0
+        self.callback = callback  # callback(sender.address, message) 消息发送者 N1
         self.cancelled = False
+
+    def __repr__(self):
+        return 'expires: %s, address: %s\n' % (self.expires, self.address)
 
     def __cmp__(self, other):
         return cmp(self.expires, other.expires)
@@ -80,12 +158,24 @@ class Timer(object):
     def cancel(self):
         self.cancelled = True
 
+
 class Network(object):
     PROP_DELAY = 0.03
     PROP_JITTER = 0.02
     DROP_PROB = 0.05
 
     def __init__(self, seed):
+        """
+        {
+            'N0': address: N0, roles: [<cluster.Seed object at 0x1066e6b50>],
+            'N1': address: N1, roles: [<cluster.Bootstrap object at 0x1066e6d10>],
+            'N2': address: N2, roles: [<cluster.Bootstrap object at 0x1066e6fd0>],
+            'N3': address: N3, roles: [<cluster.Bootstrap object at 0x10675b2d0>],
+            'N4': address: N4, roles: [<cluster.Bootstrap object at 0x10675b590>],
+            'N5': address: N5, roles: [<cluster.Bootstrap object at 0x10675b850>],
+            'N6': address: N6, roles: [<cluster.Bootstrap object at 0x10675bb10>]
+        }
+        """
         self.nodes = {}
         self.rnd = random.Random(seed)
         self.timers = []
@@ -110,15 +200,40 @@ class Network(object):
     def stop(self):
         self.timers = []
 
+    # set_timer(None, 1.0, request)
     def set_timer(self, address, seconds, callback):
+        """
+        address 消息接收者 N0
+        callback(sender.address, message) 消息发送者 N1
+        """
+        # print('*' * 10)
+        # print(address)
+        # print(seconds)
+        # print(callback)
+        # print('*' * 10)
         timer = Timer(self.now + seconds, address, callback)
         heapq.heappush(self.timers, timer)
         return timer
 
     def send(self, sender, destinations, message):
+        """
+        sender 消息发送者 N1
+        destinations 消息接收者 ['N0']
+        """
+        # Bootstrap -> Role -> Node -> Network
+        # (['N0'], Join())          -> (N1, ['N0'], Join())
         sender.logger.debug("sending %s to %s", message, destinations)
+
+        # print(self)  # <cluster.Network object at 0x10cb02b10>
+        # print(sender)  # address: N1, roles: [<cluster.Bootstrap object at 0x10cb02e10>]
+        # print(destinations)  # ['N0']
+        # print(message)  # Join()
+        # print()  # Join()
+
         # avoid aliasing by making a closure containing distinct deep copy of message for each dest
         def sendto(dest, message):
+            # print(dest)  # N0
+            # print(message)  # Join()
             if dest == sender.address:
                 # reliably deliver local messages with no delay
                 self.set_timer(sender.address, 0, lambda: sender.receive(sender.address, message))
@@ -129,6 +244,7 @@ class Network(object):
         for dest in (d for d in destinations if d in self.nodes):
             sendto(dest, copy.deepcopy(message))
 
+
 class SimTimeLogger(logging.LoggerAdapter):
 
     def process(self, msg, kwargs):
@@ -137,6 +253,7 @@ class SimTimeLogger(logging.LoggerAdapter):
     def getChild(self, name):
         return self.__class__(self.logger.getChild(name),
                               {'network': self.extra['network']})
+
 
 class Role(object):
 
@@ -147,18 +264,25 @@ class Role(object):
         self.logger = node.logger.getChild(type(self).__name__)
 
     def set_timer(self, seconds, callback):
-        return self.node.network.set_timer(self.node.address, seconds,
-                                           lambda: self.running and callback())
+        # self.set_timer(JOIN_RETRANSMIT, self.join)
+        # self.node.address 消息的发送者
+        return self.node.network.set_timer(self.node.address, seconds, lambda: self.running and callback())
 
     def stop(self):
         self.running = False
         self.node.unregister(self)
 
+
 class Acceptor(Role):
+    """
+    The Acceptor implements the acceptor role in the protocol,
+    so it must store the ballot number representing its most recent promise,
+    along with the set of accepted proposals for each slot.
+    """
 
     def __init__(self, node):
         super(Acceptor, self).__init__(node)
-        self.ballot_num = NULL_BALLOT
+        self.ballot_num = NULL_BALLOT  # NULL_BALLOT = Ballot(-1, -1) namedtuple('Ballot', ['n', 'leader']) 选票
         self.accepted_proposals = {}  # {slot: (ballot_num, proposal)}
 
     def do_Prepare(self, sender, ballot_num):
@@ -178,6 +302,7 @@ class Acceptor(Role):
 
         self.node.send([sender], Accepted(
             slot=slot, ballot_num=self.ballot_num))
+
 
 class Replica(Role):
 
@@ -284,6 +409,7 @@ class Replica(Role):
             self.node.send([sender], Welcome(
                 state=self.state, slot=self.slot, decisions=self.decisions))
 
+
 class Commander(Role):
 
     def __init__(self, node, ballot_num, slot, proposal, peers):
@@ -318,6 +444,7 @@ class Commander(Role):
             self.finished(ballot_num, False)
         else:
             self.finished(ballot_num, True)
+
 
 class Scout(Role):
 
@@ -362,6 +489,7 @@ class Scout(Role):
             # this acceptor has promised another leader a higher ballot number, so we've lost
             self.node.send([self.node.address], Preempted(slot=None, preempted_by=ballot_num))
             self.stop()
+
 
 class Leader(Role):
 
@@ -422,25 +550,28 @@ class Leader(Role):
         else:
             self.logger.info("got PROPOSE for a slot already being proposed")
 
+
 class Bootstrap(Role):
 
     def __init__(self, node, peers, execute_fn,
                  replica_cls=Replica, acceptor_cls=Acceptor, leader_cls=Leader,
                  commander_cls=Commander, scout_cls=Scout):
-        super(Bootstrap, self).__init__(node)
-        self.execute_fn = execute_fn
-        self.peers = peers
-        self.peers_cycle = itertools.cycle(peers)
-        self.replica_cls = replica_cls
-        self.acceptor_cls = acceptor_cls
-        self.leader_cls = leader_cls
-        self.commander_cls = commander_cls
-        self.scout_cls = scout_cls
+        super(Bootstrap, self).__init__(node)  # address: N1, roles: [<cluster.Bootstrap object at 0x1056edcd0>]
+        self.execute_fn = execute_fn  # <function key_value_state_machine at 0x1055da668>
+        self.peers = peers  # ['N0', 'N1', 'N2', 'N3', 'N4', 'N5', 'N6']
+        self.peers_cycle = itertools.cycle(peers)  # <itertools.cycle object at 0x105710320>
+        self.replica_cls = replica_cls  # <class 'cluster.Replica'>
+        self.acceptor_cls = acceptor_cls  # <class 'cluster.Acceptor'>
+        self.leader_cls = leader_cls  # <class 'cluster.Leader'>
+        self.commander_cls = commander_cls  # <class 'cluster.Commander'>
+        self.scout_cls = scout_cls  # <class 'cluster.Scout'>
 
     def start(self):
         self.join()
 
     def join(self):
+        # print([next(self.peers_cycle)])  # ['N0']
+        # print(Join())  # Join()
         self.node.send([next(self.peers_cycle)], Join())
         self.set_timer(JOIN_RETRANSMIT, self.join)
 
@@ -452,16 +583,20 @@ class Bootstrap(Role):
                         scout_cls=self.scout_cls).start()
         self.stop()
 
+
 class Seed(Role):
 
+    """
+    Seed(node, initial_state={}, peers=peers, execute_fn=key_value_state_machine)
+    """
     def __init__(self, node, initial_state, execute_fn, peers, bootstrap_cls=Bootstrap):
-        super(Seed, self).__init__(node)
-        self.initial_state = initial_state
-        self.execute_fn = execute_fn
-        self.peers = peers
-        self.bootstrap_cls = bootstrap_cls
-        self.seen_peers = set([])
-        self.exit_timer = None
+        super(Seed, self).__init__(node)  # address: N0, roles: [<cluster.Seed object at 0x109c88b10>]
+        self.initial_state = initial_state  # {}
+        self.execute_fn = execute_fn  # <function key_value_state_machine at 0x109b74668>
+        self.peers = peers  # ['N0', 'N1', 'N2', 'N3', 'N4', 'N5', 'N6']
+        self.bootstrap_cls = bootstrap_cls  # <class 'cluster.Bootstrap'>
+        self.seen_peers = set([])  # set([])
+        self.exit_timer = None  # None
 
     def do_Join(self, sender):
         self.seen_peers.add(sender)
@@ -484,13 +619,17 @@ class Seed(Role):
         bs.start()
         self.stop()
 
+
 class Requester(Role):
 
     client_ids = itertools.count(start=100000)
 
     def __init__(self, node, n, callback):
+        """
+        Requester(node, input, req_done).start()
+        """
         super(Requester, self).__init__(node)
-        self.client_id = self.client_ids.next()
+        self.client_id = next(self.__class__.client_ids)
         self.n = n
         self.output = None
         self.callback = callback
@@ -508,15 +647,23 @@ class Requester(Role):
         self.callback(output)
         self.stop()
 
+
 class Member(object):
 
     def __init__(self, state_machine, network, peers, seed=None,
                  seed_cls=Seed, bootstrap_cls=Bootstrap):
+        """
+        state_machine: 状态机操作方法 function
+        network
+        peers: 节点列表 []
+        seed: 种子状态 {}
+        seed_cls=Seed 用于构建新的系统
+        bootstrap_cls=Bootstrap 用于将一个节点加入已有系统
+        """
         self.network = network
         self.node = network.new_node()
         if seed is not None:
-            self.startup_role = seed_cls(self.node, initial_state=seed, peers=peers,
-                                      execute_fn=state_machine)
+            self.startup_role = seed_cls(self.node, initial_state=seed, peers=peers, execute_fn=state_machine)
         else:
             self.startup_role = bootstrap_cls(self.node, execute_fn=state_machine, peers=peers)
         self.requester = None
@@ -528,7 +675,7 @@ class Member(object):
 
     def invoke(self, input_value, request_cls=Requester):
         assert self.requester is None
-        q = Queue.Queue()
+        q = Queue()
         self.requester = request_cls(self.node, input_value, q.put)
         self.requester.start()
         output = q.get()
