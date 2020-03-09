@@ -38,17 +38,19 @@ def do_sequence(network, node, key):
 
 def main():
     logging.basicConfig(
+        # format="%(name)s - %(message)s", level=logging.DEBUG, filename='log.log')
         format="%(name)s - %(message)s", level=logging.DEBUG)
 
-    network = Network(int(sys.argv[1]))
+    network = Network(int(sys.argv[1]))  # int(sys.argv[1]) = 10
 
-    peers = ['N%d' % i for i in range(7)]
+    peers = ['N%d' % i for i in range(7)]  # ['N0', 'N1', 'N2', 'N3', 'N4', 'N5', 'N6']
     for p in peers:
         node = network.new_node(address=p)
         if p == 'N0':
             Seed(node, initial_state={}, peers=peers, execute_fn=key_value_state_machine)
         else:
             Bootstrap(node, execute_fn=key_value_state_machine, peers=peers).start()
+            sys.exit()
 
     for key in 'abcdefg':
         do_sequence(network, node, key)

@@ -80,9 +80,9 @@ Returning to the example, initially no other value has been accepted, so the acc
 
 If another proposer later initiates a ballot with a lower ballot number and a different operation (say, a transfer to acount `'Dustin J. Mitchell'`), the acceptors will simply not accept it. If that ballot has a larger ballot number, then the `Promise` from the acceptors will inform the proposer about Michael's $100.00 deposit operation, and the proposer will send that value in the `Accept` message instead of the transfer to Dustin. The new ballot will be accepted, but in favor of the same value as the first ballot.  如果另一个提议者后来以较低的投票编号发起了一次投票并且进行了其他操作（例如，转移到“ Dustin J. Mitchell”帐户），那么接受者将不会接受。 如果该投票具有更大的投票数，那么来自接受者的承诺将通知提议者Michael的$ 100.00存款操作，并且提议者将在“接受”消息中发送该值，而不是转移给Dustin。 新的投票将被接受，但支持与第一次投票相同的价值。
 
-In fact, the protocol will never allow two different values to be decided, even if the ballots overlap, messages are delayed, or a minority of acceptors fail.
+In fact, the protocol will never allow two different values to be decided, even if the ballots overlap, messages are delayed, or a minority of acceptors fail.  实际上，即使选票重叠，消息被延迟或少数接受者失败，该协议也永远不会决定两个不同的值。
 
-When multiple proposers make a ballot at the same time, it is easy for neither ballot to be accepted. Both proposers then re-propose, and hopefully one wins, but the deadlock can continue indefinitely if the timing works out just right.
+When multiple proposers make a ballot at the same time, it is easy for neither ballot to be accepted. Both proposers then re-propose, and hopefully one wins, but the deadlock can continue indefinitely if the timing works out just right.  当多个提议者同时进行投票时，两个投票都不容易被接受。 然后，两个提议者都重新提出建议，并希望一个人获胜，但是如果时机恰到好处，僵局可能会无限期地继续下去。
 
 Consider the following sequence of events:
 
@@ -92,39 +92,39 @@ Consider the following sequence of events:
 - Proposer A reacts by immediately sending a `Prepare` with a higher ballot number (3), before Proposer B can send its `Accept` message.
 - Proposer B's subsequent `Accept` is rejected, and the process repeats.
 
-With unlucky timing -- more common over long-distance connections where the time between sending a message and getting a response is long -- this deadlock can continue for many rounds.
+With unlucky timing -- more common over long-distance connections where the time between sending a message and getting a response is long -- this deadlock can continue for many rounds.  由于时机不佳-在发送消息和获得响应之间的时间较长的长距离连接中更常见-这种僵局可能会持续很多回合。
 
 ### Multi-Paxos
 
-Reaching consensus on a single static value is not particularly useful on its own. Clustered systems such as the bank account service want to agree on a particular state (account balances) that changes over time. We use Paxos to agree on each operation, treated as a state machine transition.
+Reaching consensus on a single static value is not particularly useful on its own. Clustered systems such as the bank account service want to agree on a particular state (account balances) that changes over time. We use Paxos to agree on each operation, treated as a state machine transition.  就单个静态值达成共识并不是特别有用。 诸如银行帐户服务之类的集群系统希望就随时间变化的特定状态（帐户余额）达成一致。 我们使用Paxos在每个操作上达成共识，将其视为状态机转换。
 
-Multi-Paxos is, in effect, a sequence of simple Paxos instances (slots), each numbered sequentially. Each state transition is given a "slot number", and each member of the cluster executes transitions in strict numeric order. To change the cluster's state (to process a transfer operation, for example), we try to achieve consensus on that operation in the next slot. In concrete terms, this means adding a slot number to each message, with all of the protocol state tracked on a per-slot basis.
+Multi-Paxos is, in effect, a sequence of simple Paxos instances (slots), each numbered sequentially. Each state transition is given a "slot number", and each member of the cluster executes transitions in strict numeric order. To change the cluster's state (to process a transfer operation, for example), we try to achieve consensus on that operation in the next slot. In concrete terms, this means adding a slot number to each message, with all of the protocol state tracked on a per-slot basis.  实际上，Multi-Paxos是一系列简单的Paxos实例（插槽），每个实例均按顺序编号。 每个状态转换都被赋予一个“插槽号”，并且集群的每个成员都按照严格的数字顺序执行转换。 为了更改群集的状态（例如，处理传输操作），我们尝试在下一个插槽中就该操作达成共识。 具体而言，这意味着在每个消息中添加一个插槽号，并且所有协议状态均以每个插槽为基础进行跟踪。
 
-Running Paxos for every slot, with its minimum of two round trips, would be too slow. Multi-Paxos optimizes by using the same set of ballot numbers for all slots, and performing the `Prepare`/`Promise` phase for all slots at once.
+Running Paxos for every slot, with its minimum of two round trips, would be too slow. Multi-Paxos optimizes by using the same set of ballot numbers for all slots, and performing the `Prepare`/`Promise` phase for all slots at once.  为每个插槽运行Paxos，至少要往返两次，这太慢了。 Multi-Paxos通过对所有插槽使用相同的一组选票编号并一次对所有插槽执行“准备/承诺”阶段进行优化。
 
 ### Paxos Made Pretty Hard
 
-Implementing Multi-Paxos in practical software is notoriously difficult, spawning a number of papers mocking Lamport's "Paxos Made Simple" with titles like "Paxos Made Practical".
+Implementing Multi-Paxos in practical software is notoriously difficult, spawning a number of papers mocking Lamport's "Paxos Made Simple" with titles like "Paxos Made Practical".  在实际的软件中实现Multi-Paxos非常困难，产生了许多模仿Lamport的“ Paxos Made Simple”的论文，标题为“ Paxos Made Practical”。
 
-First, the multiple-proposers problem described above can become problematic in a busy environment, as each cluster member attempts to get its state machine operation decided in each slot. The fix is to elect a "leader" which is responsible for submitting ballots for each slot. All other cluster nodes then send new operations to the leader for execution. Thus, in normal operation with only one leader, ballot conflicts do not occur.
+First, the multiple-proposers problem described above can become problematic in a busy environment, as each cluster member attempts to get its state machine operation decided in each slot. The fix is to elect a "leader" which is responsible for submitting ballots for each slot. All other cluster nodes then send new operations to the leader for execution. Thus, in normal operation with only one leader, ballot conflicts do not occur.  首先，当每个集群成员试图在每个插槽中确定其状态机操作时，上述的多提案者问题在繁忙的环境中可能会成为问题。 解决办法是选举一个“负责人”，负责为每个插槽提交选票。 然后，所有其他群集节点将新操作发送给领导者以执行。 因此，在只有一名领导者的正常行动中，不会发生选票冲突。
 
-The `Prepare`/`Promise` phase can function as a kind of leader election: whichever cluster member owns the most recently promised ballot number is considered the leader. The leader is then free to execute the `Accept`/`Accepted` phase directly without repeating the first phase. As we'll see below, leader elections are actually quite complex.
+The `Prepare`/`Promise` phase can function as a kind of leader election: whichever cluster member owns the most recently promised ballot number is considered the leader. The leader is then free to execute the `Accept`/`Accepted` phase directly without repeating the first phase. As we'll see below, leader elections are actually quite complex.  “准备/承诺”阶段可以用作一种领导者选举：拥有最近承诺的投票号码的任何集群成员都被视为领导者。 然后，领导者可以自由地直接执行“接受/接受”阶段，而无需重复第一阶段。 正如我们将在下面看到的那样，领导人选举实际上非常复杂。
 
-Although simple Paxos guarantees that the cluster will not reach conflicting decisions, it cannot guarantee that any decision will be made. For example, if the initial `Prepare` message is lost and doesn't reach the acceptors, then the proposer will wait for a `Promise` message that will never arrive. Fixing this requires carefully orchestrated re-transmissions: enough to eventually make progress, but not so many that the cluster buries itself in a packet storm.
+Although simple Paxos guarantees that the cluster will not reach conflicting decisions, it cannot guarantee that any decision will be made. For example, if the initial `Prepare` message is lost and doesn't reach the acceptors, then the proposer will wait for a `Promise` message that will never arrive. Fixing this requires carefully orchestrated re-transmissions: enough to eventually make progress, but not so many that the cluster buries itself in a packet storm.  尽管简单的Paxos可以保证群集不会做出相冲突的决策，但它不能保证将做出任何决策。 例如，如果最初的“准备”消息丢失并且没有到达接受者，则提议者将等待永远不会到达的“承诺”消息。 要解决此问题，需要精心策划重新传输：足以最终取得进展，但数量又不足以使集群将自身埋在数据包风暴中。
 
-Another problem is the dissemination of decisions. A simple broadcast of a `Decision` message can take care of this for the normal case. If the message is lost, though, a node can remain permanently ignorant of the decision and unable to apply state machine transitions for later slots. So an implementation needs some mechanism for sharing information about decided proposals.
+Another problem is the dissemination of decisions. A simple broadcast of a `Decision` message can take care of this for the normal case. If the message is lost, though, a node can remain permanently ignorant of the decision and unable to apply state machine transitions for later slots. So an implementation needs some mechanism for sharing information about decided proposals.  另一个问题是决策的传播。 在正常情况下，对决策消息的简单广播可以解决此问题。 但是，如果消息丢失，则节点可以永久不知道该决定，并且无法为以后的时隙应用状态机转换。 因此，实现需要某种机制来共享有关已确定提案的信息。
 
-Our use of a distributed state machine presents another interesting challenge: start-up. When a new node starts, it needs to catch up on the existing state of the cluster. Although it can do so by catching up on decisions for all slots since the first, in a mature cluster this may involve millions of slots. Furthermore, we need some way to initialize a new cluster.
+Our use of a distributed state machine presents another interesting challenge: start-up. When a new node starts, it needs to catch up on the existing state of the cluster. Although it can do so by catching up on decisions for all slots since the first, in a mature cluster this may involve millions of slots. Furthermore, we need some way to initialize a new cluster.  我们对分布式状态机的使用提出了另一个有趣的挑战：启动。 当新节点启动时，它需要赶上集群的现有状态。 尽管它可以通过追赶自第一个时隙以来所有时隙的决定来做到这一点，但在成熟的集群中，这可能涉及数百万个时隙。 此外，我们需要某种方式来初始化新集群。
 
-But enough talk of theory and algorithms -- let's have a look at the code.
+But enough talk of theory and algorithms -- let's have a look at the code.  但是足够多的理论和算法讨论-让我们看一下代码。
 
 ## Introducing Cluster
 
-The *Cluster* library in this chapter implements a simple form of Multi-Paxos. It is designed as a library to provide a consensus service to a larger application.
+The *Cluster* library in this chapter implements a simple form of Multi-Paxos. It is designed as a library to provide a consensus service to a larger application.  本章中的群集库实现了一种简单的Multi-Paxos形式。 它被设计为可为大型应用程序提供共识服务的库。
 
-Users of this library will depend on its correctness, so it's important to structure the code so that we can see -- and test -- its correspondence to the specification. Complex protocols can exhibit complex failures, so we will build support for reproducing and debugging rare failures.
+Users of this library will depend on its correctness, so it's important to structure the code so that we can see -- and test -- its correspondence to the specification. Complex protocols can exhibit complex failures, so we will build support for reproducing and debugging rare failures.  该库的用户将取决于它的正确性，因此对代码进行结构化以便我们可以看到并测试其与规范的对应关系非常重要。 复杂的协议可能会表现出复杂的故障，因此我们将建立对重现和调试罕见故障的支持。
 
-The implementation in this chapter is proof-of-concept code: enough to demonstrate that the core concept is practical, but without all of the mundane equipment required for use in production. The code is structured so that such equipment can be added later with minimal changes to the core implementation.
+The implementation in this chapter is proof-of-concept code: enough to demonstrate that the core concept is practical, but without all of the mundane equipment required for use in production. The code is structured so that such equipment can be added later with minimal changes to the core implementation.  本章中的实现是概念验证代码：足以证明核心概念是可行的，但没有用于生产所需的所有普通设备。 该代码经过结构设计，以便以后可以在对核心实现进行最少更改的情况下添加此类设备。
 
 Let's get started.
 
@@ -186,9 +186,9 @@ Finally, Cluster uses two data types named to correspond to the protocol descrip
 
 ### Component Model
 
-Humans are limited by what we can hold in our active memory. We can't reason about the entire Cluster implementation at once -- it's just too much, so it's easy to miss details. For similar reasons, large monolithic codebases are hard to test: test cases must manipulate many moving pieces and are brittle, failing on almost any change to the code.
+Humans are limited by what we can hold in our active memory. We can't reason about the entire Cluster implementation at once -- it's just too much, so it's easy to miss details. For similar reasons, large monolithic codebases are hard to test: test cases must manipulate many moving pieces and are brittle, failing on almost any change to the code.  人类受到我们在活动记忆中所能容纳的东西的限制。 我们无法立即考虑整个集群的实现-太多了，因此很容易错过细节。 出于类似的原因，大型的整体代码库也很难测试：测试用例必须操纵许多活动部件并且很脆弱，几乎对代码所做的任何更改都失败。
 
-To encourage testability and keep the code readable, we break Cluster down into a handful of classes corresponding to the roles described in the protocol. Each is a subclass of `Role`.
+To encourage testability and keep the code readable, we break Cluster down into a handful of classes corresponding to the roles described in the protocol. Each is a subclass of `Role`.  为了鼓励可测试性并保持代码可读性，我们将Cluster分解为与协议中描述的角色相对应的几个类。 每个都是Role的子类。
 
 ```
 class Role(object):
