@@ -149,8 +149,8 @@ class Node(object):
         self.roles = []
         self.send = functools.partial(self.network.send, self)
 
-    def __repr__(self):
-        return 'node address: %s, roles: %s' % (self.address, self.roles)
+    def __str__(self):
+        return 'Node address: %s, roles: %s' % (self.address, self.roles)
 
     def register(self, roles):
         self.roles.append(roles)
@@ -159,10 +159,10 @@ class Node(object):
         self.roles.remove(roles)
 
     def receive(self, sender, message):
-        # print(self)  # node address: N0, roles: [<cluster.Seed object at 0x100f3bb90>]
-        # print(sender)  # N4
+        print(self)  # node address: N0, roles: [<cluster.Seed object at 0x100f3bb90>]
+        print(sender)  # N4
         handler_name = 'do_%s' % type(message).__name__
-        # print(handler_name)  # do_Join
+        print(handler_name)  # do_Join
 
         for comp in self.roles[:]:
             if not hasattr(comp, handler_name):
@@ -181,7 +181,7 @@ class Timer(object):
         self.cancelled = False
 
     def __repr__(self):
-        return 'expires: %s, address: %s\n' % (self.expires, self.address)
+        return '(expires: %s, address: %s)' % (self.expires, self.address)
 
     def __cmp__(self, other):
         return cmp(self.expires, other.expires)
@@ -212,21 +212,33 @@ class Network(object):
         self.timers = []
         self.now = 1000.0
 
+    def __repr__(self):
+        return 'Network nodes: %s, timers: %s' % (self.nodes, self.timers)
+
     def new_node(self, address=None):
         node = Node(self, address=address)
         self.nodes[node.address] = node
         return node
 
     def run(self):
+        i = 0
         while self.timers:
+            i += 1
+            if i >= 40:
+                break
             next_timer = self.timers[0]
+            print('************** network run %s**************' % (self.timers))
+            print(next_timer)
             if next_timer.expires > self.now:
                 self.now = next_timer.expires
             heapq.heappop(self.timers)
             if next_timer.cancelled:
                 continue
             if not next_timer.address or next_timer.address in self.nodes:
-                next_timer.callback()
+                print('执行回调')
+                print(next_timer.callback)
+                r = next_timer.callback()
+                print(r)
 
     def stop(self):
         self.timers = []
@@ -263,9 +275,10 @@ class Network(object):
 
         # avoid aliasing by making a closure containing distinct deep copy of message for each dest
         def sendto(dest, message):
-            # print(dest)  # N0
-            # print(message)  # Join()
+            print(dest)  # N0
+            print(message)  # Join()
             if dest == sender.address:
+                print('发送地址和接收地址一样')
                 # reliably deliver local messages with no delay
                 self.set_timer(sender.address, 0, lambda: sender.receive(sender.address, message))
             elif self.rnd.uniform(0, 1.0) > self.DROP_PROB:
@@ -349,6 +362,9 @@ class Replica(Role):
         self.next_slot = slot
         self.latest_leader = None
         self.latest_leader_timeout = None
+
+    def __str__(self):
+        return 'Replica state: %s, slot: %s, decisions: %s, proposals: %s, next_slot: %s, latest_leader: %s, latest_leader_timeout: %s, running: %s' % (self.state, self.slot, self.decisions, self.proposals, self.next_slot, self.latest_leader, self.latest_leader_timeout, self.running)
 
     # making proposals
 
@@ -543,12 +559,18 @@ class Leader(Role):
         self.scouting = False
         self.peers = peers
 
+    def __str__(self):
+        return 'Leader ballot_num: %s, active: %s, scouting: %s, running: %s' % (self.ballot_num, self.active, self.scouting, self.running)
+
     def start(self):
         # reminder others we're active before LEADER_TIMEOUT expires
         def active():
             if self.active:
+                print('qwe')
                 self.node.send(self.peers, Active())
+            print('asd')
             self.set_timer(LEADER_TIMEOUT / 2.0, active)
+            print(self.node.network.timers)
         active()
 
     def spawn_scout(self):
@@ -607,6 +629,9 @@ class Bootstrap(Role):
         self.commander_cls = commander_cls  # <class 'cluster.Commander'>
         self.scout_cls = scout_cls  # <class 'cluster.Scout'>
 
+    def __str__(self):
+        return 'Bootstrap running: %s' % self.running
+
     def start(self):
         self.join()
 
@@ -615,15 +640,26 @@ class Bootstrap(Role):
         # print(Join())  # Join()
         self.node.send([next(self.peers_cycle)], Join())
         self.set_timer(JOIN_RETRANSMIT, self.join)
+        print(self.node.network.timers)
+        print(self.node.roles)
 
     def do_Welcome(self, sender, state, slot, decisions):
         self.acceptor_cls(self.node)
-        self.replica_cls(self.node, execute_fn=self.execute_fn, peers=self.peers,
+
+        replica = self.replica_cls(self.node, execute_fn=self.execute_fn, peers=self.peers,
                          state=state, slot=slot, decisions=decisions)
-        self.leader_cls(self.node, peers=self.peers, commander_cls=self.commander_cls,
-                        scout_cls=self.scout_cls).start()
-        # print(self.node.roles)
+        print(replica)
+
+        leader = self.leader_cls(self.node, peers=self.peers, commander_cls=self.commander_cls,
+                        scout_cls=self.scout_cls)
+        print(leader)
+        leader.start()
+
+        print(self.node.roles)
+
         self.stop()
+        print(self)
+        print(self.node.roles)
 
 
 class Seed(Role):
@@ -640,24 +676,32 @@ class Seed(Role):
         self.seen_peers = set([])  # set([])
         self.exit_timer = None  # None
 
+    def __str__(self):
+        return 'Seed initial_state: %s, seen_peers: %s, exit_timer: %s' % (self.initial_state, self.seen_peers, self.exit_timer)
+
     def do_Join(self, sender):
         self.seen_peers.add(sender)  # N4
+        print(self)
         if len(self.seen_peers) <= len(self.peers) / 2:
             return
 
         # cluster is ready - welcome everyone
         self.node.send(list(self.seen_peers), Welcome(
             state=self.initial_state, slot=1, decisions={}))
+        print(self.node.network.timers)
 
         # stick around for long enough that we don't hear any new JOINs from
         # the newly formed cluster
         if self.exit_timer:
             self.exit_timer.cancel()
         self.exit_timer = self.set_timer(JOIN_RETRANSMIT * 2, self.finish)
+        print(self)
+        print(self.node.network.timers)
 
     def finish(self):
         # bootstrap this node into the cluster we just seeded
         bs = self.bootstrap_cls(self.node, peers=self.peers, execute_fn=self.execute_fn)
+        print(self.node.roles)
         bs.start()
         self.stop()
 

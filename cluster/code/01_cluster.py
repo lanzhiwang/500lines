@@ -82,6 +82,9 @@ IndexError: index out of range
 """
 
 # data types
+"""
+Proposal(caller='N2', client_id=100000, input=('get', 'b'))
+"""
 Proposal = namedtuple('Proposal', ['caller', 'client_id', 'input'])  # 提案
 Ballot = namedtuple('Ballot', ['n', 'leader'])  # 选票
 
@@ -90,13 +93,35 @@ Accepted = namedtuple('Accepted', ['slot', 'ballot_num'])
 Accept = namedtuple('Accept', ['slot', 'ballot_num', 'proposal'])
 Decision = namedtuple('Decision', ['slot', 'proposal'])  # 决断
 Invoked = namedtuple('Invoked', ['client_id', 'output'])  # 调用
+
+"""
+Invoke(caller=self.node.address, client_id=self.client_id, input_value=self.n)
+Invoke(caller='N2', client_id=100000, input_value=('get', 'b'))
+"""
 Invoke = namedtuple('Invoke', ['caller', 'client_id', 'input_value'])
+
+"""
+Join()
+"""
 Join = namedtuple('Join', [])
-Active = namedtuple('Active', [])  # 活性
+Active = namedtuple('Active', [])  # 存活
+
+"""
+Prepare(ballot_num=Ballot(n=0, leader='N2')) to ['N0', 'N1', 'N2']
+"""
 Prepare = namedtuple('Prepare', ['ballot_num'])  # 准备
 Promise = namedtuple('Promise', ['ballot_num', 'accepted_proposals'])  # 诺言
-Propose = namedtuple('Propose', ['slot', 'proposal'])  # 优惠
+
+"""
+Propose(slot=1, proposal=Proposal(caller='N2', client_id=100000, input=('get', 'b')))
+"""
+Propose = namedtuple('Propose', ['slot', 'proposal'])  # 提出提案
+
+"""
+Welcome(state=self.initial_state, slot=1, decisions={})
+"""
 Welcome = namedtuple('Welcome', ['state', 'slot', 'decisions'])
+
 Decided = namedtuple('Decided', ['slot'])  # 决定
 Preempted = namedtuple('Preempted', ['slot', 'preempted_by'])  # 抢占
 Adopted = namedtuple('Adopted', ['ballot_num', 'accepted_proposals'])  # 通过
@@ -124,6 +149,9 @@ class Node(object):
         self.roles = []
         self.send = functools.partial(self.network.send, self)
 
+    def __str__(self):
+        return 'Node address: %s, roles: %s' % (self.address, self.roles)
+
     def register(self, roles):
         self.roles.append(roles)
 
@@ -131,7 +159,10 @@ class Node(object):
         self.roles.remove(roles)
 
     def receive(self, sender, message):
+        print(self)  # node address: N0, roles: [<cluster.Seed object at 0x100f3bb90>]
+        print(sender)  # N4
         handler_name = 'do_%s' % type(message).__name__
+        print(handler_name)  # do_Join
 
         for comp in self.roles[:]:
             if not hasattr(comp, handler_name):
@@ -150,7 +181,7 @@ class Timer(object):
         self.cancelled = False
 
     def __repr__(self):
-        return 'expires: %s, address: %s\n' % (self.expires, self.address)
+        return '(expires: %s, address: %s)' % (self.expires, self.address)
 
     def __cmp__(self, other):
         return cmp(self.expires, other.expires)
@@ -181,21 +212,33 @@ class Network(object):
         self.timers = []
         self.now = 1000.0
 
+    def __repr__(self):
+        return 'Network nodes: %s, timers: %s' % (self.nodes, self.timers)
+
     def new_node(self, address=None):
         node = Node(self, address=address)
         self.nodes[node.address] = node
         return node
 
     def run(self):
+        i = 0
         while self.timers:
+            i += 1
+            if i >= 40:
+                break
             next_timer = self.timers[0]
+            print('************** network run %s**************' % (self.timers))
+            print(next_timer)
             if next_timer.expires > self.now:
                 self.now = next_timer.expires
             heapq.heappop(self.timers)
             if next_timer.cancelled:
                 continue
             if not next_timer.address or next_timer.address in self.nodes:
-                next_timer.callback()
+                print('执行回调')
+                print(next_timer.callback)
+                r = next_timer.callback()
+                print(r)
 
     def stop(self):
         self.timers = []
@@ -232,9 +275,10 @@ class Network(object):
 
         # avoid aliasing by making a closure containing distinct deep copy of message for each dest
         def sendto(dest, message):
-            # print(dest)  # N0
-            # print(message)  # Join()
+            print(dest)  # N0
+            print(message)  # Join()
             if dest == sender.address:
+                print('发送地址和接收地址一样')
                 # reliably deliver local messages with no delay
                 self.set_timer(sender.address, 0, lambda: sender.receive(sender.address, message))
             elif self.rnd.uniform(0, 1.0) > self.DROP_PROB:
@@ -319,11 +363,15 @@ class Replica(Role):
         self.latest_leader = None
         self.latest_leader_timeout = None
 
+    def __str__(self):
+        return 'Replica state: %s, slot: %s, decisions: %s, proposals: %s, next_slot: %s, latest_leader: %s, latest_leader_timeout: %s, running: %s' % (self.state, self.slot, self.decisions, self.proposals, self.next_slot, self.latest_leader, self.latest_leader_timeout, self.running)
+
     # making proposals
 
     def do_Invoke(self, sender, caller, client_id, input_value):
         proposal = Proposal(caller, client_id, input_value)
-        slot = next((s for s, p in self.proposals.iteritems() if p == proposal), None)
+        slot = next((s for s, p in self.proposals.items() if p == proposal), None)
+        print(slot)
         # propose, or re-propose if this proposal already has a slot
         self.propose(proposal, slot)
 
@@ -332,6 +380,14 @@ class Replica(Role):
         if not slot:
             slot, self.next_slot = self.next_slot, self.next_slot + 1
         self.proposals[slot] = proposal
+        # print(self.proposals)
+        """
+        {
+            1: Proposal(caller='N2', client_id=100000, input=('get', 'b')),
+            2: Proposal(caller='N2', client_id=100001, input=('get', 'a'))
+        }
+        """
+
         # find a leader we think is working - either the latest we know of, or
         # ourselves (which may trigger a scout to make us the leader)
         leader = self.latest_leader or self.node.address
@@ -479,7 +535,7 @@ class Scout(Role):
             if len(self.acceptors) >= self.quorum:
                 # strip the ballot numbers from self.accepted_proposals, now that it
                 # represents a majority
-                accepted_proposals = dict((s, p) for s, (b, p) in self.accepted_proposals.iteritems())
+                accepted_proposals = dict((s, p) for s, (b, p) in self.accepted_proposals.items())
                 # We're adopted; note that this does *not* mean that no other leader is active.
                 # Any such conflicts will be handled by the commanders.
                 self.node.send([self.node.address],
@@ -503,18 +559,25 @@ class Leader(Role):
         self.scouting = False
         self.peers = peers
 
+    def __str__(self):
+        return 'Leader ballot_num: %s, active: %s, scouting: %s, running: %s' % (self.ballot_num, self.active, self.scouting, self.running)
+
     def start(self):
         # reminder others we're active before LEADER_TIMEOUT expires
         def active():
             if self.active:
+                print('qwe')
                 self.node.send(self.peers, Active())
+            print('asd')
             self.set_timer(LEADER_TIMEOUT / 2.0, active)
+            print(self.node.network.timers)
         active()
 
     def spawn_scout(self):
         assert not self.scouting
         self.scouting = True
         self.scout_cls(self.node, self.ballot_num, self.peers).start()
+        print(self.node.roles)
 
     def do_Adopted(self, sender, ballot_num, accepted_proposals):
         self.scouting = False
@@ -566,6 +629,9 @@ class Bootstrap(Role):
         self.commander_cls = commander_cls  # <class 'cluster.Commander'>
         self.scout_cls = scout_cls  # <class 'cluster.Scout'>
 
+    def __str__(self):
+        return 'Bootstrap running: %s' % self.running
+
     def start(self):
         self.join()
 
@@ -574,14 +640,26 @@ class Bootstrap(Role):
         # print(Join())  # Join()
         self.node.send([next(self.peers_cycle)], Join())
         self.set_timer(JOIN_RETRANSMIT, self.join)
+        print(self.node.network.timers)
+        print(self.node.roles)
 
     def do_Welcome(self, sender, state, slot, decisions):
         self.acceptor_cls(self.node)
-        self.replica_cls(self.node, execute_fn=self.execute_fn, peers=self.peers,
+
+        replica = self.replica_cls(self.node, execute_fn=self.execute_fn, peers=self.peers,
                          state=state, slot=slot, decisions=decisions)
-        self.leader_cls(self.node, peers=self.peers, commander_cls=self.commander_cls,
-                        scout_cls=self.scout_cls).start()
+        print(replica)
+
+        leader = self.leader_cls(self.node, peers=self.peers, commander_cls=self.commander_cls,
+                        scout_cls=self.scout_cls)
+        print(leader)
+        leader.start()
+
+        print(self.node.roles)
+
         self.stop()
+        print(self)
+        print(self.node.roles)
 
 
 class Seed(Role):
@@ -598,24 +676,32 @@ class Seed(Role):
         self.seen_peers = set([])  # set([])
         self.exit_timer = None  # None
 
+    def __str__(self):
+        return 'Seed initial_state: %s, seen_peers: %s, exit_timer: %s' % (self.initial_state, self.seen_peers, self.exit_timer)
+
     def do_Join(self, sender):
-        self.seen_peers.add(sender)
+        self.seen_peers.add(sender)  # N4
+        print(self)
         if len(self.seen_peers) <= len(self.peers) / 2:
             return
 
         # cluster is ready - welcome everyone
         self.node.send(list(self.seen_peers), Welcome(
             state=self.initial_state, slot=1, decisions={}))
+        print(self.node.network.timers)
 
         # stick around for long enough that we don't hear any new JOINs from
         # the newly formed cluster
         if self.exit_timer:
             self.exit_timer.cancel()
         self.exit_timer = self.set_timer(JOIN_RETRANSMIT * 2, self.finish)
+        print(self)
+        print(self.node.network.timers)
 
     def finish(self):
         # bootstrap this node into the cluster we just seeded
         bs = self.bootstrap_cls(self.node, peers=self.peers, execute_fn=self.execute_fn)
+        print(self.node.roles)
         bs.start()
         self.stop()
 
