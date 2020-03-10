@@ -159,10 +159,10 @@ class Node(object):
         self.roles.remove(roles)
 
     def receive(self, sender, message):
-        print(self)  # node address: N0, roles: [<cluster.Seed object at 0x100f3bb90>]
-        print(sender)  # N4
+        # print(self)  # node address: N0, roles: [<cluster.Seed object at 0x100f3bb90>]
+        # print(sender)  # N4
         handler_name = 'do_%s' % type(message).__name__
-        print(handler_name)  # do_Join
+        # print(handler_name)  # do_Join
 
         for comp in self.roles[:]:
             if not hasattr(comp, handler_name):
@@ -174,14 +174,15 @@ class Node(object):
 
 class Timer(object):
 
-    def __init__(self, expires, address, callback):
+    def __init__(self, expires, address, callback, name):
         self.expires = expires
         self.address = address  # address 消息接收者 N0
         self.callback = callback  # callback(sender.address, message) 消息发送者 N1
         self.cancelled = False
+        self.name = name
 
     def __repr__(self):
-        return '(expires: %s, address: %s)' % (self.expires, self.address)
+        return '(name: %s, expires: %s, address: %s)' % (self.name, self.expires, self.address)
 
     def __cmp__(self, other):
         return cmp(self.expires, other.expires)
@@ -221,13 +222,14 @@ class Network(object):
         return node
 
     def run(self):
-        i = 0
+        # i = 0
         while self.timers:
-            i += 1
-            if i >= 40:
-                break
+            # i += 1
+            # if i >= 40:
+            #     break
             next_timer = self.timers[0]
-            print('************** network run %s**************' % (self.timers))
+            print('************** network run **************')
+            # print('************** network run %s**************' % (self.timers))
             print(next_timer)
             if next_timer.expires > self.now:
                 self.now = next_timer.expires
@@ -238,13 +240,13 @@ class Network(object):
                 print('执行回调')
                 print(next_timer.callback)
                 r = next_timer.callback()
-                print(r)
+                # print(r)
 
     def stop(self):
         self.timers = []
 
     # set_timer(None, 1.0, request)
-    def set_timer(self, address, seconds, callback):
+    def set_timer(self, address, seconds, callback, name):
         """
         address 消息接收者 N0
         callback(sender.address, message) 消息发送者 N1
@@ -254,11 +256,11 @@ class Network(object):
         # print(seconds)
         # print(callback)
         # print('*' * 10)
-        timer = Timer(self.now + seconds, address, callback)
+        timer = Timer(self.now + seconds, address, callback, name)
         heapq.heappush(self.timers, timer)
         return timer
 
-    def send(self, sender, destinations, message):
+    def send(self, sender, destinations, message, name):
         """
         sender 消息发送者 N1
         destinations 消息接收者 ['N0']
@@ -275,16 +277,16 @@ class Network(object):
 
         # avoid aliasing by making a closure containing distinct deep copy of message for each dest
         def sendto(dest, message):
-            print(dest)  # N0
-            print(message)  # Join()
+            # print(dest)  # N0
+            # print(message)  # Join()
             if dest == sender.address:
-                print('发送地址和接收地址一样')
+                # print('发送地址和接收地址一样')
                 # reliably deliver local messages with no delay
-                self.set_timer(sender.address, 0, lambda: sender.receive(sender.address, message))
+                self.set_timer(sender.address, 0, lambda: sender.receive(sender.address, message), name)
             elif self.rnd.uniform(0, 1.0) > self.DROP_PROB:
                 delay = self.PROP_DELAY + self.rnd.uniform(-self.PROP_JITTER, self.PROP_JITTER)
                 self.set_timer(dest, delay, functools.partial(self.nodes[dest].receive,
-                                                              sender.address, message))
+                                                              sender.address, message), name)
         for dest in (d for d in destinations if d in self.nodes):
             sendto(dest, copy.deepcopy(message))
 
@@ -307,10 +309,10 @@ class Role(object):
         self.running = True
         self.logger = node.logger.getChild(type(self).__name__)
 
-    def set_timer(self, seconds, callback):
+    def set_timer(self, seconds, callback, name):
         # self.set_timer(JOIN_RETRANSMIT, self.join)
         # self.node.address 消息的发送者
-        return self.node.network.set_timer(self.node.address, seconds, lambda: self.running and callback())
+        return self.node.network.set_timer(self.node.address, seconds, lambda: self.running and callback(), name)
 
     def stop(self):
         self.running = False
@@ -333,9 +335,11 @@ class Acceptor(Role):
         if ballot_num > self.ballot_num:
             self.ballot_num = ballot_num
             # we've heard from a scout, so it might be the next leader
-            self.node.send([self.node.address], Accepting(leader=sender))
+            self.node.send([self.node.address], Accepting(leader=sender), 'Acceptor-do_Prepare')
 
-        self.node.send([sender], Promise(ballot_num=self.ballot_num, accepted_proposals=self.accepted_proposals))
+        self.node.send([sender], Promise(ballot_num=self.ballot_num, accepted_proposals=self.accepted_proposals), 'Acceptor-do_Prepare')
+        print(self.node.network.timers)
+
 
     def do_Accept(self, sender, ballot_num, slot, proposal):
         if ballot_num >= self.ballot_num:
@@ -345,7 +349,7 @@ class Acceptor(Role):
                 acc[slot] = (ballot_num, proposal)
 
         self.node.send([sender], Accepted(
-            slot=slot, ballot_num=self.ballot_num))
+            slot=slot, ballot_num=self.ballot_num), 'Acceptor-do_Accept')
 
 
 class Replica(Role):
@@ -357,7 +361,7 @@ class Replica(Role):
         self.slot = slot
         self.decisions = decisions
         self.peers = peers
-        self.proposals = {}
+        self.proposals = {}  # 提案
         # next slot num for a proposal (may lead slot)
         self.next_slot = slot
         self.latest_leader = None
@@ -368,10 +372,11 @@ class Replica(Role):
 
     # making proposals
 
+    # Invoke(caller='N2', client_id=100000, input_value=('get', 'a'))
     def do_Invoke(self, sender, caller, client_id, input_value):
-        proposal = Proposal(caller, client_id, input_value)
+        proposal = Proposal(caller, client_id, input_value)  # 提案，一个调用组装为一个提案
         slot = next((s for s, p in self.proposals.items() if p == proposal), None)
-        print(slot)
+        # print(slot)
         # propose, or re-propose if this proposal already has a slot
         self.propose(proposal, slot)
 
@@ -379,20 +384,21 @@ class Replica(Role):
         """Send (or resend, if slot is specified) a proposal to the leader"""
         if not slot:
             slot, self.next_slot = self.next_slot, self.next_slot + 1
-        self.proposals[slot] = proposal
-        # print(self.proposals)
+        self.proposals[slot] = proposal  # 将提案放进槽里面
+        print(self.proposals)
         """
         {
-            1: Proposal(caller='N2', client_id=100000, input=('get', 'b')),
-            2: Proposal(caller='N2', client_id=100001, input=('get', 'a'))
+            1: Proposal(caller='N2', client_id=100000, input=('get', 'a'))
         }
         """
 
         # find a leader we think is working - either the latest we know of, or
         # ourselves (which may trigger a scout to make us the leader)
         leader = self.latest_leader or self.node.address
+        print(leader)
         self.logger.info("proposing %s at slot %d to leader %s" % (proposal, slot, leader))
-        self.node.send([leader], Propose(slot=slot, proposal=proposal))
+        self.node.send([leader], Propose(slot=slot, proposal=proposal), 'Replica-propose')
+        print(self.node.network.timers)
 
     # handling decided proposals
 
@@ -431,7 +437,7 @@ class Replica(Role):
         if proposal.caller is not None:
             # perform a client operation
             self.state, output = self.execute_fn(self.state, proposal.input)
-            self.node.send([proposal.caller], Invoked(client_id=proposal.client_id, output=output))
+            self.node.send([proposal.caller], Invoked(client_id=proposal.client_id, output=output), 'Replica-commit')
 
     # tracking the leader
 
@@ -456,7 +462,8 @@ class Replica(Role):
             idx = self.peers.index(self.latest_leader)
             self.latest_leader = self.peers[(idx + 1) % len(self.peers)]
             self.logger.debug("leader timed out; tring the next one, %s", self.latest_leader)
-        self.latest_leader_timeout = self.set_timer(LEADER_TIMEOUT, reset_leader)
+        self.latest_leader_timeout = self.set_timer(LEADER_TIMEOUT, reset_leader, 'Replica-leader_alive')
+        print(self.node.network.timers)
 
     # adding new cluster members
 
@@ -479,14 +486,14 @@ class Commander(Role):
 
     def start(self):
         self.node.send(set(self.peers) - self.acceptors, Accept(
-                            slot=self.slot, ballot_num=self.ballot_num, proposal=self.proposal))
-        self.set_timer(ACCEPT_RETRANSMIT, self.start)
+                            slot=self.slot, ballot_num=self.ballot_num, proposal=self.proposal), 'Commander-start')
+        self.set_timer(ACCEPT_RETRANSMIT, self.start, 'Commander-start')
 
     def finished(self, ballot_num, preempted):
         if preempted:
             self.node.send([self.node.address], Preempted(slot=self.slot, preempted_by=ballot_num))
         else:
-            self.node.send([self.node.address], Decided(slot=self.slot))
+            self.node.send([self.node.address], Decided(slot=self.slot), 'Commander-finished')
         self.stop()
 
     def do_Accepted(self, sender, slot, ballot_num):
@@ -496,7 +503,7 @@ class Commander(Role):
             self.acceptors.add(sender)
             if len(self.acceptors) < self.quorum:
                 return
-            self.node.send(self.peers, Decision(slot=self.slot, proposal=self.proposal))
+            self.node.send(self.peers, Decision(slot=self.slot, proposal=self.proposal), 'Commander-do_Accepted')
             self.finished(ballot_num, False)
         else:
             self.finished(ballot_num, True)
@@ -518,12 +525,13 @@ class Scout(Role):
         self.send_prepare()
 
     def send_prepare(self):
-        self.node.send(self.peers, Prepare(ballot_num=self.ballot_num))
-        self.retransmit_timer = self.set_timer(PREPARE_RETRANSMIT, self.send_prepare)
+        self.node.send(self.peers, Prepare(ballot_num=self.ballot_num), 'Scout-send_prepare')
+        self.retransmit_timer = self.set_timer(PREPARE_RETRANSMIT, self.send_prepare, 'Scout-send_prepare')
+        print(self.node.network.timers)
 
     def update_accepted(self, accepted_proposals):
         acc = self.accepted_proposals
-        for slot, (ballot_num, proposal) in accepted_proposals.iteritems():
+        for slot, (ballot_num, proposal) in accepted_proposals.items():
             if slot not in acc or acc[slot][0] < ballot_num:
                 acc[slot] = (ballot_num, proposal)
 
@@ -539,7 +547,7 @@ class Scout(Role):
                 # We're adopted; note that this does *not* mean that no other leader is active.
                 # Any such conflicts will be handled by the commanders.
                 self.node.send([self.node.address],
-                               Adopted(ballot_num=ballot_num, accepted_proposals=accepted_proposals))
+                               Adopted(ballot_num=ballot_num, accepted_proposals=accepted_proposals), 'Scout-do_Promise')
                 self.stop()
         else:
             # this acceptor has promised another leader a higher ballot number, so we've lost
@@ -566,18 +574,21 @@ class Leader(Role):
         # reminder others we're active before LEADER_TIMEOUT expires
         def active():
             if self.active:
-                print('qwe')
-                self.node.send(self.peers, Active())
-            print('asd')
-            self.set_timer(LEADER_TIMEOUT / 2.0, active)
-            print(self.node.network.timers)
+                # print('qwe')
+                self.node.send(self.peers, Active(), 'leader-start')
+            # print('asd')
+            self.set_timer(LEADER_TIMEOUT / 2.0, active, 'leader-start')
+            # print(self.node.network.timers)
         active()
 
     def spawn_scout(self):
         assert not self.scouting
         self.scouting = True
-        self.scout_cls(self.node, self.ballot_num, self.peers).start()
+        scout = self.scout_cls(self.node, self.ballot_num, self.peers)
+        print(scout)
         print(self.node.roles)
+        scout.start()
+        # print(self.node.roles)
 
     def do_Adopted(self, sender, ballot_num, accepted_proposals):
         self.scouting = False
@@ -638,28 +649,28 @@ class Bootstrap(Role):
     def join(self):
         # print([next(self.peers_cycle)])  # ['N0']
         # print(Join())  # Join()
-        self.node.send([next(self.peers_cycle)], Join())
-        self.set_timer(JOIN_RETRANSMIT, self.join)
-        print(self.node.network.timers)
-        print(self.node.roles)
+        self.node.send([next(self.peers_cycle)], Join(), 'Bootstrap-join')
+        self.set_timer(JOIN_RETRANSMIT, self.join, 'Bootstrap-join')
+        # print(self.node.network.timers)
+        # print(self.node.roles)
 
     def do_Welcome(self, sender, state, slot, decisions):
         self.acceptor_cls(self.node)
 
         replica = self.replica_cls(self.node, execute_fn=self.execute_fn, peers=self.peers,
                          state=state, slot=slot, decisions=decisions)
-        print(replica)
+        # print(replica)
 
         leader = self.leader_cls(self.node, peers=self.peers, commander_cls=self.commander_cls,
                         scout_cls=self.scout_cls)
-        print(leader)
+        # print(leader)
         leader.start()
 
-        print(self.node.roles)
+        # print(self.node.roles)
 
         self.stop()
-        print(self)
-        print(self.node.roles)
+        # print(self)
+        # print(self.node.roles)
 
 
 class Seed(Role):
@@ -681,27 +692,27 @@ class Seed(Role):
 
     def do_Join(self, sender):
         self.seen_peers.add(sender)  # N4
-        print(self)
+        # print(self)
         if len(self.seen_peers) <= len(self.peers) / 2:
             return
 
         # cluster is ready - welcome everyone
         self.node.send(list(self.seen_peers), Welcome(
-            state=self.initial_state, slot=1, decisions={}))
-        print(self.node.network.timers)
+            state=self.initial_state, slot=1, decisions={}), 'Seed-do-join')
+        # print(self.node.network.timers)
 
         # stick around for long enough that we don't hear any new JOINs from
         # the newly formed cluster
         if self.exit_timer:
             self.exit_timer.cancel()
-        self.exit_timer = self.set_timer(JOIN_RETRANSMIT * 2, self.finish)
-        print(self)
-        print(self.node.network.timers)
+        self.exit_timer = self.set_timer(JOIN_RETRANSMIT * 2, self.finish, 'Seed-do-join')
+        # print(self)
+        # print(self.node.network.timers)
 
     def finish(self):
         # bootstrap this node into the cluster we just seeded
         bs = self.bootstrap_cls(self.node, peers=self.peers, execute_fn=self.execute_fn)
-        print(self.node.roles)
+        # print(self.node.roles)
         bs.start()
         self.stop()
 
@@ -710,20 +721,21 @@ class Requester(Role):
 
     client_ids = itertools.count(start=100000)
 
-    def __init__(self, node, n, callback):
+    def __init__(self, node, input, callback):
         """
         Requester(node, input, req_done).start()
         """
         super(Requester, self).__init__(node)
         self.client_id = next(self.__class__.client_ids)
-        self.n = n
+        self.input = input
         self.output = None
         self.callback = callback
 
     def start(self):
         self.node.send([self.node.address], Invoke(caller=self.node.address,
-                                                   client_id=self.client_id, input_value=self.n))
-        self.invoke_timer = self.set_timer(INVOKE_RETRANSMIT, self.start)
+                                                   client_id=self.client_id, input_value=self.input), 'Requester-start')
+        self.invoke_timer = self.set_timer(INVOKE_RETRANSMIT, self.start, 'Requester-start')
+        print(self.node.network.timers)
 
     def do_Invoked(self, sender, client_id, output):
         if client_id != self.client_id:
